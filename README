@@ -1,0 +1,7 @@
+Emacs major mode to interface with iwd, allowing you to manage
+wireless connections.
+
+Intended for setups which use iwd stand-alone. If you use iwd as a
+backend for NetworkManager you should interface with NetworkManager
+rather than directly with iwd. Incompatible with any other wireless
+daemons, like wpa_supplicant.
