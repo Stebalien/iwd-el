@@ -345,6 +345,16 @@ Part of the `net.connman.iwd.Agent' interface."
       :object-path iwd--agent-path)
     (setq iwd--agent-registered nil)))
 
+(define-minor-mode iwd-agent-mode
+  "Agent for the iNet Wireless Daemon (iwd).
+
+When enabled, Emacs will prompt the user for network credentials on behalf of
+iwd."
+  :global t
+  (if iwd-agent-mode
+      (iwd--register-agent)
+    (iwd--unregister-agent)))
+
 (defun iwd ()
   "Control iwd WLAN connections."
   (interactive)
