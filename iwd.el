@@ -196,6 +196,22 @@
                             (error "No (other) networks available."))))
       (cadr (assoc selected-ssid networks)))))
 
+(defun iwd-disconnect--get-device-paths ()
+  (if (eq major-mode 'iwd-mode)
+      ;; Get network-entry from selected table vector.  Raises error
+      ;; with cursor on KnownNetworks and currently connected
+      ;; networks.
+      (let* ((id (tabulated-list-get-id))
+             (entry (tabulated-list-get-entry))
+             (conn (elt entry 0))
+             (name (elt entry 1))
+             (dev (elt entry 2)))
+        (unless (string= iwd-connected-symbol conn)
+          (user-error "Not connected to `%s' (%s)" name dev))
+        (list (dbus-get-property :system iwd--dbus-service
+                (symbol-name id) "net.connman.iwd.Network" "Device")))
+    (mapcar 'car (iwd--get-devices (iwd--get-obj-alist)))))
+
 (defun iwd-connect (path)
   (interactive (list (iwd-connect--get-network-path)))
   (dbus-call-method :system iwd--dbus-service
@@ -214,6 +230,13 @@
       (car device) "net.connman.iwd.Station" "Scan"))
   (if (eq major-mode 'iwd-mode)
       (revert-buffer)))
+
+(defun iwd-disconnect ()
+  "Disconnect the selected network, or all networks if not in an `iwd' buffer."
+  (interactive)
+  (dolist (device (iwd-disconnect--get-device-paths))
+    (dbus-call-method :system iwd--dbus-service
+      device "net.connman.iwd.Station" "Disconnect")))
 
 (defvar iwd-mode-map
   (let ((map (make-sparse-keymap)))
