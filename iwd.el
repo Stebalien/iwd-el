@@ -231,16 +231,19 @@
                 (symbol-name id) "net.connman.iwd.Network" "Device")))
     (mapcar 'car (iwd--get-devices (iwd--get-obj-alist)))))
 
+;;;###autoload
 (defun iwd-connect (path)
   (interactive (list (iwd-connect--get-network-path)))
   (dbus-call-method :system iwd--dbus-service
     path "net.connman.iwd.Network" "Connect"))
 
+;;;###autoload
 (defun iwd-forget (path)
   (interactive (list (iwd-forget--get-network-path)))
   (dbus-call-method :system iwd--dbus-service
     path "net.connman.iwd.KnownNetwork" "Forget"))
 
+;;;###autoload
 (defun iwd-scan ()
   "Scan for available networks."
   (interactive)
@@ -251,6 +254,7 @@
       (dbus-call-method-asynchronously :system iwd--dbus-service
         (car device) "net.connman.iwd.Station" "Scan" nil))))
 
+;;;###autoload
 (defun iwd-disconnect ()
   "Disconnect the selected network, or all networks if not in an `iwd' buffer."
   (interactive)
@@ -405,6 +409,7 @@ Part of the `net.connman.iwd.Agent' interface."
       :object-path iwd--agent-path)
     (setq iwd--agent-registered nil)))
 
+;;;###autoload
 (define-minor-mode iwd-agent-mode
   "Agent for the iNet Wireless Daemon (iwd).
 
@@ -415,6 +420,7 @@ iwd."
       (iwd--register-agent)
     (iwd--unregister-agent)))
 
+;;;###autoload
 (defun iwd ()
   "Control iwd WLAN connections."
   (interactive)
