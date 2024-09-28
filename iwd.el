@@ -226,10 +226,8 @@
   "Scan for available networks."
   (interactive)
   (dolist (device (iwd--get-devices (iwd--get-obj-alist)))
-    (dbus-call-method :system iwd--dbus-service
-      (car device) "net.connman.iwd.Station" "Scan"))
-  (if (eq major-mode 'iwd-mode)
-      (revert-buffer)))
+    (dbus-call-method-asynchronously :system iwd--dbus-service
+      (car device) "net.connman.iwd.Station" "Scan" nil)))
 
 (defun iwd-disconnect ()
   "Disconnect the selected network, or all networks if not in an `iwd' buffer."
@@ -245,6 +243,46 @@
     (define-key map (kbd "s") #'iwd-scan)
     map)
   "iwd mode keymap.")
+
+(defvar iwd--state-change-dbus-signals nil)
+(defvar iwd--state-change-debounce-timer nil)
+(defvar iwd--state-change-debounce-timeout nil)
+
+(defun iwd--signal-handler-finish ()
+  "Handles change signals from iwd and updates the iwd buffer accordingly."
+  (setq iwd--state-change-debounce-timer nil
+        iwd--state-change-debounce-timeout nil)
+  (if-let ((buf (get-buffer iwd--buffer-name)))
+      (with-current-buffer buf
+        (tabulated-list-revert))
+    (iwd--unregister-signal-handler)))
+
+(defun iwd--signal-handler (&rest _ignore)
+  "Handles change signals from iwd, debouncing them and eventually calling `iwd--signal-handler-finish'."
+  (unless iwd--state-change-debounce-timeout
+    (setq iwd--state-change-debounce-timeout (+ (float-time) 1.0))
+  (when (and iwd--state-change-debounce-timer
+             (< (float-time) iwd--state-change-debounce-timeout))
+    (cancel-timer iwd--state-change-debounce-timer)
+    (setq iwd--state-change-debounce-timer nil))
+  (unless iwd--state-change-debounce-timer
+    (setq iwd--state-change-debounce-timer
+          (run-with-timer 0.1 nil #'iwd--signal-handler-finish)))))
+
+(defun iwd--register-signal-handler ()
+  (unless iwd--state-change-dbus-signals
+    (dolist (m '("InterfacesAdded" "InterfacesRemoved"))
+      (push
+       (dbus-register-signal
+        :system iwd--dbus-service
+        "/" dbus-interface-objectmanager m
+        #'iwd--signal-handler)
+       iwd--state-change-dbus-signals))))
+
+(defun iwd--unregister-signal-handler ()
+  (dolist (obj iwd--state-change-dbus-signals)
+    (dbus-unregister-object obj))
+  (setq iwd--state-change-dbus-signals nil))
 
 (define-derived-mode iwd-mode tabulated-list-mode
   iwd--mode-name
@@ -359,6 +397,7 @@ iwd."
   "Control iwd WLAN connections."
   (interactive)
   (with-current-buffer (switch-to-buffer iwd--buffer-name)
+    (iwd--register-signal-handler)
     (unless (derived-mode-p 'iwd-mode)
       (erase-buffer)
       (iwd-mode))))
