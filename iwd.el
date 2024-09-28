@@ -18,6 +18,15 @@
   :type 'string
   :group 'iwd)
 
+(defface iwd-known-network '((t :inherit (italic font-lock-comment-face)))
+  "Face for known networks.")
+
+(defface iwd-available-network '((t :inherit bold))
+  "Face for available networks.")
+
+(defface iwd-connected-network '((t :inherit success))
+  "Face for the connected network.")
+
 (defcustom iwd-known-symbol "+"
   "Symbol used to indicate a known network."
   :type 'string
@@ -112,7 +121,11 @@
 						  (cdr (assoc "Address" device-obj))
 						""))
 				     (sigqual (iwd--signal-strength-to-string (cadr (assoc (car obj) device-obj)))))
-				(list id (vector connected (propertize ssid 'face 'bold) device-name sigqual security address))))))
+				(list id (vector connected (propertize
+                                                            ssid
+                                                            'face
+                                                            (if (equal connected iwd-connected-symbol) 'iwd-connected-network 'iwd-available-network))
+                                                 device-name sigqual security address))))))
     (mapcar format (seq-filter filter obj-alist))))
 
 (defun iwd--get-known-networks-row (obj-alist visible-networks)
@@ -126,7 +139,7 @@
 				       (known-network (assoc "net.connman.iwd.KnownNetwork" obj))
 				       (ssid (cdr (assoc "Name" known-network)))
 				       (security (cdr (assoc "Type" known-network))))
-				  (list id (vector iwd-known-symbol (propertize ssid 'face 'italic) "" "" security ""))))))
+				  (list id (vector "" (propertize ssid 'face 'iwd-known-network) "" "" security ""))))))
     (mapcar format (seq-filter filter obj-alist))))
 
 (defun iwd--list-entries ()
