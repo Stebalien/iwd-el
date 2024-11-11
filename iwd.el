@@ -227,7 +227,8 @@
 	tabulated-list-padding 0
 	tabulated-list-sort-key (cons "Device" t))
   (tabulated-list-init-header)
-  (tabulated-list-print))
+  (tabulated-list-print)
+  (hl-line-mode))
 
 (defun iwd ()
   "Control iwd WLAN connections."
