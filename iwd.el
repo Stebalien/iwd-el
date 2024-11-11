@@ -16,6 +16,11 @@
   :type 'string
   :group 'iwd)
 
+(defcustom iwd-known-symbol "+"
+  "Symbol used to indicate a known network."
+  :type 'string
+  :group 'iwd)
+
 (defcustom iwd-signal-show-dbm nil
   "Display signal strength in dBm instead of symbolic indicator."
   :tag "Show signal strenght in dBm"
@@ -82,9 +87,10 @@
 				     (device-obj (assoc (cdr (assoc "Device" network)) devices))
 				     (device-name (cdr (assoc "Name" device-obj)))
 				     (security (cdr (assoc "Type" network)))
-				     (connected (if (cdr (assoc "Connected" network))
-						    iwd-connected-symbol
-						  ""))
+				     (connected (cond
+						 ((cdr (assoc "Connected" network)) iwd-connected-symbol)
+						 ((cdr (assoc "KnownNetwork" network)) iwd-known-symbol)
+						 (t "")))
 				     (address (if (cdr (assoc "Connected" network))
 						  (cdr (assoc "Address" device-obj))
 						""))
@@ -103,7 +109,7 @@
 				       (known-network (assoc "net.connman.iwd.KnownNetwork" obj))
 				       (ssid (cdr (assoc "Name" known-network)))
 				       (security (cdr (assoc "Type" known-network))))
-				  (list id (vector ""  (propertize ssid 'face 'italic) "" "" security ""))))))
+				  (list id (vector iwd-known-symbol (propertize ssid 'face 'italic) "" "" security ""))))))
     (mapcar format (seq-filter filter obj-alist))))
 
 (defun iwd--list-entries ()
@@ -115,7 +121,9 @@
     (append visible-networks known-networks)))
 
 (defconst iwd--list-format
-  (vector `("" ,(length iwd-connected-symbol) nil)
+  (vector `("" ,(max (length iwd-connected-symbol)
+                     (length iwd-known-symbol))
+            nil)
 	  '("SSID" 30 t)
 	  '("Device" 13 t)
 	  '("Signal" 6 t)
@@ -132,7 +140,7 @@
 			      (entry (tabulated-list-get-entry))
 			      (conn (elt entry 0))
 			      (sig (elt entry 3)))
-			 (cond ((> (length conn) 0)
+			 (cond ((string-equal conn iwd-connected-symbol)
 				(error "Already connected to this network."))
 			       ((not (> (length sig) 0))
 				(error "This network is not available at this moment."))
