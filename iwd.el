@@ -25,12 +25,13 @@
 (defconst iwd--mode-name "iwd")
 (defconst iwd--buffer-name "*WLAN*")
 (defconst iwd--dbus-service "net.connman.iwd")
+(defconst iwd--dbus-path "/net/connman/iwd")
 
 (defun iwd--get-obj-alist ()
   "Get all toplevel DBus objects related to iwd."
   (dbus-get-all-managed-objects :system
-				iwd--dbus-service
-				"/net/connman/iwd"))
+    iwd--dbus-service
+    iwd--dbus-path))
 
 (defun iwd--get-devices (obj-alist)
   "Extract devices from the object alist."
