@@ -230,6 +230,94 @@
   (tabulated-list-print)
   (hl-line-mode))
 
+(defconst iwd--agent-path (concat dbus-path-emacs "/iwd_agent"))
+
+(defun iwd--get-network-name (path)
+  "Get the network name of PATH."
+  (dbus-get-property :system iwd--dbus-service
+    path "net.connman.iwd.Network" "Name"))
+
+(defvar iwd--agent-registered nil
+  "Non-nil when the IWD agent has been registered.")
+
+(defun iwd--agent-release ()
+  "Release the IWD agent.
+
+Part of the `net.connman.iwd.Agent' interface."
+  (setq iwd--agent-registered nil))
+
+(defun iwd--agent-request-passphrase (path)
+  "Request the passphrase for the network at PATH.
+
+Part of the `net.connman.iwd.Agent' interface."
+  (list (read-passwd (format "[iwd] Network passphrase for '%s': " (iwd--get-network-name path)))))
+
+(defun iwd--agent-request-private-key-passphrase (path)
+  "Request the passphrase for the private key associated with the network at PATH.
+
+Part of the `net.connman.iwd.Agent' interface."
+  (list (read-passwd (format "[iwd] Private key passphrase for '%s': " (iwd--get-network-name path)))))
+
+(defun iwd--agent-request-user-name-and-password (path)
+  "Request the user name and password for the network at PATH.
+
+Part of the `net.connman.iwd.Agent' interface."
+  (let* ((netw (iwd--get-network-name path))
+         (user (read-string (format "[iwd] User Name for '%s' [default: %s]: " netw user-login-name)
+                            nil nil user-login-name))
+         (pass (read-passwd (format "[iwd] Password for '%s' @ '%s': " user netw))))
+    (list user pass)))
+
+(defun iwd--agent-cancel (reason)
+  "Cancel an agent request for REASON.
+
+Part of the `net.connman.iwd.Agent' interface."
+  (message "[iwd] Connection attempt canceled: %s" reason))
+
+(defconst iwd--agent-methods
+  '(("Release" . iwd--agent-release)
+    ("RequestPassphrase" . iwd--agent-request-passphrase)
+    ("RequestPrivateKeyPassphrase" . iwd--agent-request-private-key-passphrase)
+    ("RequestUserNameAndPassword" . iwd--agent-request-user-name-and-password)
+    ("Cancel" . iwd--agent-cancel)))
+
+(defvar iwd--agent-method-objects nil
+  "Registered method objects for the IWD agent.")
+
+(defun iwd--ensure-agent ()
+  "Create an IWD agent if it doesn't already exist."
+  (unless iwd--agent-method-objects
+    (setq iwd--agent-method-objects
+          (mapcar (pcase-lambda (`(,method . ,handler))
+                    (dbus-register-method
+                     :system nil iwd--agent-path "net.connman.iwd.Agent" method handler 'dont-register))
+                  iwd--agent-methods))))
+
+(defun iwd--destroy-agent ()
+  "Create an IWD agent."
+  (when iwd--agent-method-objects
+    (iwd-unregister-agent)
+    (dolist (obj iwd--agent-method-objects)
+      (dbus-unregister-object obj))
+    (setq iwd--agent-method-objects nil)))
+
+(defun iwd-register-agent ()
+  "Register the IWD agent."
+  (unless iwd--agent-registered
+    (iwd--ensure-agent)
+    (dbus-call-method :system iwd--dbus-service
+      iwd--dbus-path "net.connman.iwd.AgentManager" "RegisterAgent"
+      :object-path iwd--agent-path)
+    (setq iwd--agent-registered t)))
+
+(defun iwd-unregister-agent ()
+  "Unregister the IWD agent."
+  (when iwd--agent-registered
+    (dbus-call-method :system iwd--dbus-service
+      iwd--dbus-path "net.connman.iwd.AgentManager" "UnregisterAgent"
+      :object-path iwd--agent-path)
+    (setq iwd--agent-registered nil)))
+
 (defun iwd ()
   "Control iwd WLAN connections."
   (interactive)
