@@ -78,6 +78,15 @@
 				(list name id)))))
     (mapcar format (seq-filter filter obj-alist))))
 
+(defun iwd--get-known-networks (obj-alist)
+  "Return list of all known networks."
+  (let ((filter (lambda (obj) (assoc "net.connman.iwd.KnownNetwork" obj)))
+	(format (lambda (obj) (let* ((id (intern (car obj)))
+				(network (assoc "net.connman.iwd.KnownNetwork" obj))
+				(name (cdr (assoc "Name" network))))
+			   (list name id)))))
+    (mapcar format (seq-filter filter obj-alist))))
+
 (defun iwd--get-visible-networks-row (obj-alist devices)
   "Return list of all visible networks, formatted for use in tabulated-list-mode."
   (let ((filter (lambda (obj) (assoc "net.connman.iwd.Network" obj)))
@@ -152,18 +161,49 @@
 			    (devices (iwd--get-devices obj-alist))
 			    (networks (iwd--get-connectable-networks obj-alist devices))
 			    (ssids (mapcar (lambda (x) (car x)) networks))
-			    (selected-ssid (if (> (length ssids) 0)
-					       (completing-read "Connect to network: " ssids)
-					     (error "No (other) networks available.")))
-			    (selected-id (cadr (assoc selected-ssid networks))))
-		       (if selected-id selected-id (error "Invalid SSID!"))))))
+                            (selected-ssid
+                             (if (> (length ssids) 0)
+                                 (completing-read "Connect to network: " ssids
+                                                  nil 'must-match)
+                               (error "No (other) networks available."))))
+                       (cadr (assoc selected-ssid networks))))))
     (symbol-name id-symbol)))
+
+(defun iwd-forget--get-network-path ()
+  "In iwd mode uses table entry under cursor, other wise queries user for SSID."
+  (if (eq major-mode 'iwd-mode)
+      ;; Get network-entry from selected table vector.  Raises error
+      ;; with cursor on KnownNetworks and currently connected
+      ;; networks.
+      (let* ((id (tabulated-list-get-id))
+             (entry (tabulated-list-get-entry))
+             (conn (elt entry 0))
+             (sig (elt entry 3)))
+        (when (length= conn 0)
+          (error "Network not known"))
+        (dbus-get-property :system iwd--dbus-service (symbol-name id)
+          "net.connman.iwd.Network" "KnownNetwork"))
+    ;; Get list of known networks, then query user for SSID. Raises error if known
+    ;; networks are available.
+    (let* ((obj-alist (iwd--get-obj-alist))
+           (networks (iwd--get-known-networks obj-alist))
+           (ssids (mapcar (lambda (x) (car x)) networks))
+           (selected-ssid (if (> (length ssids) 0)
+                              (completing-read "Forget network: " ssids
+                                               nil 'must-match)
+                            (error "No (other) networks available."))))
+      (cadr (assoc selected-ssid networks)))))
 
 (defun iwd-connect (path)
   (interactive (list (iwd-connect--get-network-path)))
   (message path)
   ;; TODO XXX actually connect to network
   )
+
+(defun iwd-forget (path)
+  (interactive (list (iwd-forget--get-network-path)))
+  (dbus-call-method :system iwd--dbus-service
+    path "net.connman.iwd.KnownNetwork" "Forget"))
 
 (defvar iwd-mode-map
   (let ((map (make-sparse-keymap)))
