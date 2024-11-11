@@ -9,7 +9,9 @@
 ;; Add dwim command, which on enter connects/disconnects from network in list
 ;; Add command to connect to hidden network
 
-(defgroup iwd nil "Customize iwd-mode settings.")
+(defgroup iwd nil
+  "Customize iwd-mode settings."
+  :group 'convenience)
 
 (defcustom iwd-connected-symbol "->"
   "Symbol used to indicate a current connection."
