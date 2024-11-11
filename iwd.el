@@ -205,6 +205,13 @@
   (dbus-call-method :system iwd--dbus-service
     path "net.connman.iwd.KnownNetwork" "Forget"))
 
+(defun iwd-scan ()
+  "Scan for available networks."
+  (interactive)
+  (dolist (device (iwd--get-devices (iwd--get-obj-alist)))
+    (dbus-call-method :system iwd--dbus-service
+      (car device) "net.connman.iwd.Station" "Scan")))
+
 (defvar iwd-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
