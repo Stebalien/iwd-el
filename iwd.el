@@ -56,9 +56,9 @@
     (if iwd-signal-show-dbm
 	(concat (int-to-string dbm) " dBm")
       (propertize (cond ((>= dbm -30) "*****")
-			((>= dbm -50) "****")
-			((>= dbm -67) "***")
-			((>= dbm -75) "**")
+			((>= dbm -67) "****")
+			((>= dbm -80) "***")
+			((>= dbm -90) "**")
 			(t "*"))
 		  'face 'bold))))
 
