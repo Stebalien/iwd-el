@@ -196,9 +196,8 @@
 
 (defun iwd-connect (path)
   (interactive (list (iwd-connect--get-network-path)))
-  (message path)
-  ;; TODO XXX actually connect to network
-  )
+  (dbus-call-method :system iwd--dbus-service
+    path "net.connman.iwd.Network" "Connect"))
 
 (defun iwd-forget (path)
   (interactive (list (iwd-forget--get-network-path)))
