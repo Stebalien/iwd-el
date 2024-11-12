@@ -211,7 +211,9 @@
   (interactive)
   (dolist (device (iwd--get-devices (iwd--get-obj-alist)))
     (dbus-call-method :system iwd--dbus-service
-      (car device) "net.connman.iwd.Station" "Scan")))
+      (car device) "net.connman.iwd.Station" "Scan"))
+  (if (eq major-mode 'iwd-mode)
+      (revert-buffer)))
 
 (defvar iwd-mode-map
   (let ((map (make-sparse-keymap)))
