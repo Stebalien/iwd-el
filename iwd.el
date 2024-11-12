@@ -219,6 +219,7 @@
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
     (define-key map (kbd "c") #'iwd-connect)
+    (define-key map (kbd "s") #'iwd-scan)
     map)
   "iwd mode keymap.")
 
