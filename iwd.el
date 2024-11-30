@@ -1,16 +1,47 @@
+;;; iwd.el --- Manage IWD Networks -*- lexical-binding: t -*-
+
+;; Copyright 2024 Leon Henrik Plickat <leonhenrik.plickat@stud.uni-goettingen.de>
+;; Copyright 2024 Steven Allen <steven@stebalien.com>
+
+;; Author: Leon Henrik Plickat <leonhenrik.plickat@stud.uni-goettingen.de>
+;; URL: https://git.sr.ht/~leon_plickat/iwd-el
+;; Version: 0.0.1
+;; Package-Requires: ((emacs "29.1"))
+;; Keywords: unix, network
+
+;; This file is not part of GNU Emacs.
+
+;; This file is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 3, or (at your option)
+;; any later version.
+
+;; This file is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with GNU Emacs; see the file COPYING.  If not, write to
+;; the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+;; Boston, MA 02111-1307, USA.
+
+;;; Commentary:
+
+;; Major mode to interface with iwd, allowing you to manage wireless connections.
+
+;;; Code:
+
 (require 'dbus)
 
 ;; TODO: DBus methods that may be useful
-;; net.connman.iwd.KnownNetwork: Forget
-;; net.connman.iwd.Network: Connect
-;; How to connect password prompt?
-;; -> use (read-passwd "Password for network XXX")
 ;; -> use (y-or-no-p "Forget network XXX?") for deleting known networks
 ;; Add dwim command, which on enter connects/disconnects from network in list
 ;; Add command to connect to hidden network
 
 (defgroup iwd nil
-  "Customize iwd-mode settings."
+  "Customize `iwd-mode' settings."
+  :prefix "iwd-"
   :group 'convenience)
 
 (defcustom iwd-connected-symbol "->"
@@ -50,7 +81,7 @@
     iwd--dbus-path))
 
 (defun iwd--get-devices (obj-alist)
-  "Extract powered devices from the object alist."
+  "Extract powered devices from the OBJ-ALIST."
   (let ((filter (lambda (obj) (assoc "net.connman.iwd.Device" obj)))
 	(format (lambda (obj) (let ((dev (assoc "net.connman.iwd.Device" obj)))
                            (append (list (car obj)
@@ -68,7 +99,7 @@
     (mapcar format (seq-filter filter obj-alist))))
 
 (defun iwd--signal-strength-to-string (s)
-  "Turn signal strength as returned by iwd to string displayed in iwd-mode."
+  "Turn signal strength S as returned by iwd to string displayed in `iwd-mode'."
   (let ((dbm (/ s 100)))
     (if iwd-signal-show-dbm
 	(concat (int-to-string dbm) " dBm")
@@ -80,7 +111,10 @@
 		  'face 'bold))))
 
 (defun iwd--get-connectable-networks (obj-alist devices)
-  "Return list of all networks which we could connect to. Device name is added to SSID if multiple devices are available."
+  "Return a list all networks we can connect to from the given OBJ-ALIST.
+
+Device name is added to SSID if multiple devices are available and DEVICES is
+non-nil."
   (let ((filter (lambda (obj) (let* ((network (assoc "net.connman.iwd.Network" obj))
 				     (connected (assoc "Connected" network)))
 				(and network (not (cdr connected))))))
@@ -96,7 +130,7 @@
     (mapcar format (seq-filter filter obj-alist))))
 
 (defun iwd--get-known-networks (obj-alist)
-  "Return list of all known networks."
+  "Return a list of all known networks from the given OBJ-ALIST."
   (let ((filter (lambda (obj) (assoc "net.connman.iwd.KnownNetwork" obj)))
 	(format (lambda (obj) (let* ((id (intern (car obj)))
 				(network (assoc "net.connman.iwd.KnownNetwork" obj))
@@ -105,7 +139,9 @@
     (mapcar format (seq-filter filter obj-alist))))
 
 (defun iwd--get-visible-networks-row (obj-alist devices)
-  "Return list of all visible networks, formatted for use in tabulated-list-mode."
+  "Return a list of all visible networks from the given OBJ-ALIST and DEVICES.
+
+The returned list is formatted for use in `tabulated-list-mode'."
   (let ((filter (lambda (obj) (assoc "net.connman.iwd.Network" obj)))
 	(format (lambda (obj) (let* ((id (intern (car obj)))
 				     (network (assoc "net.connman.iwd.Network" obj))
@@ -129,7 +165,10 @@
     (mapcar format (seq-filter filter obj-alist))))
 
 (defun iwd--get-known-networks-row (obj-alist visible-networks)
-  "Return list of all known networks, formatted for use in tabulated-list-mode. Excludes visible networks."
+  "Return a list of all known networks from the given OBJ-ALIST.
+
+The returned list is formatted for use in `tabulated-list-mode'. If specified,
+networks in VISIBLE-NETWORKS are excluded."
   (let* ((extract-name (lambda (id) (last (delete "" (split-string id "/")))))
 	 (visible-network-names (mapcar (lambda (obj) (funcall extract-name (symbol-name (car obj)))) visible-networks))
 	 (filter (lambda (obj) (and (assoc "net.connman.iwd.KnownNetwork" obj)
@@ -143,7 +182,7 @@
     (mapcar format (seq-filter filter obj-alist))))
 
 (defun iwd--list-entries ()
-  "Generate the iwd-mode table entries."
+  "Generate the `iwd-mode' table entries."
   (let* ((obj-alist (iwd--get-obj-alist))
 	 (devices (iwd--get-devices obj-alist))
 	 (visible-networks (iwd--get-visible-networks-row obj-alist devices))
@@ -171,9 +210,9 @@
 			      (conn (elt entry 0))
 			      (sig (elt entry 3)))
 			 (cond ((string-equal conn iwd-connected-symbol)
-				(error "Already connected to this network."))
+				(user-error "Already connected to this network"))
 			       ((not (> (length sig) 0))
-				(error "This network is not available at this moment."))
+				(user-error "This network is not available at this moment"))
 			       (t id)))
 		     ;; Get list of connectable networks, then querry
 		     ;; user for SSID. Raises error if no unconnected
@@ -186,22 +225,24 @@
                              (if (> (length ssids) 0)
                                  (completing-read "Connect to network: " ssids
                                                   nil 'must-match)
-                               (error "No (other) networks available."))))
+                               (user-error "No (other) networks available"))))
                        (cadr (assoc selected-ssid networks))))))
     (symbol-name id-symbol)))
 
 (defun iwd-forget--get-network-path ()
-  "In iwd mode uses table entry under cursor, other wise queries user for SSID."
+  "Returns the D-Bus object path of the network to forget.
+
+In `iwd-mode' it uses table entry under cursor, otherwise it queries user for
+SSID."
   (if (eq major-mode 'iwd-mode)
       ;; Get network-entry from selected table vector.  Raises error
       ;; with cursor on KnownNetworks and currently connected
       ;; networks.
       (let* ((id (tabulated-list-get-id))
              (entry (tabulated-list-get-entry))
-             (conn (elt entry 0))
-             (sig (elt entry 3)))
+             (conn (elt entry 0)))
         (when (length= conn 0)
-          (error "Network not known"))
+          (user-error "Network not known"))
         (dbus-get-property :system iwd--dbus-service (symbol-name id)
           "net.connman.iwd.Network" "KnownNetwork"))
     ;; Get list of known networks, then query user for SSID. Raises error if known
@@ -212,10 +253,15 @@
            (selected-ssid (if (> (length ssids) 0)
                               (completing-read "Forget network: " ssids
                                                nil 'must-match)
-                            (error "No (other) networks available."))))
+                            (user-error "No (other) networks available"))))
       (cadr (assoc selected-ssid networks)))))
 
 (defun iwd-disconnect--get-device-paths ()
+  "Returns some number of devices to disconnect.
+
+In `iwd-mode' it uses table entry under cursor (returns the device of the
+connected network under the cursor, if any). Otherwise, it returns all
+devices."
   (if (eq major-mode 'iwd-mode)
       ;; Get network-entry from selected table vector.  Raises error
       ;; with cursor on KnownNetworks and currently connected
@@ -233,12 +279,14 @@
 
 ;;;###autoload
 (defun iwd-connect (path)
+  "Connect to the wireless network at PATH."
   (interactive (list (iwd-connect--get-network-path)))
   (dbus-call-method :system iwd--dbus-service
     path "net.connman.iwd.Network" "Connect"))
 
 ;;;###autoload
 (defun iwd-forget (path)
+  "Forget the wireless network at PATH."
   (interactive (list (iwd-forget--get-network-path)))
   (dbus-call-method :system iwd--dbus-service
     path "net.connman.iwd.KnownNetwork" "Forget"))
@@ -262,40 +310,55 @@
     (dbus-call-method :system iwd--dbus-service
       device "net.connman.iwd.Station" "Disconnect")))
 
-(defvar iwd-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map tabulated-list-mode-map)
-    (define-key map (kbd "c") #'iwd-connect)
-    (define-key map (kbd "s") #'iwd-scan)
-    map)
-  "iwd mode keymap.")
+(defvar-keymap iwd-mode-map
+  :doc "`iwd-mode' keymap."
+  :parent tabulated-list-mode-map
+  (kbd "c") #'iwd-connect
+  (kbd "s") #'iwd-scan)
 
-(defvar iwd--state-change-dbus-signals nil)
-(defvar iwd--state-change-debounce-timer nil)
-(defvar iwd--state-change-debounce-timeout nil)
+(defvar iwd--state-change-dbus-signals nil
+  "Registered D-Bus state-change signal handlers.")
+
+(defvar iwd--state-change-debounce-timer nil
+  "Currently active state-change debounce timer.")
+
+(defvar iwd--state-change-debounce-timeout nil
+  "Time beyond which state-change signals will not be delayed.")
+
+(defconst iwd--state-change-debounce-min 0.1
+  "Minimum time between `iwd-mode' buffer updates triggered by D-Bus signals.")
+
+(defconst iwd--state-change-debounce-max 1.0
+  "Maximum time between `iwd-mode' buffer updates triggered by D-Bus signals.")
 
 (defun iwd--signal-handler-finish ()
   "Handles change signals from iwd and updates the iwd buffer accordingly."
   (setq iwd--state-change-debounce-timer nil
         iwd--state-change-debounce-timeout nil)
-  (if-let ((buf (get-buffer iwd--buffer-name)))
+  (if-let* ((buf (get-buffer iwd--buffer-name)))
       (with-current-buffer buf
         (tabulated-list-revert))
     (iwd--unregister-signal-handler)))
 
 (defun iwd--signal-handler (&rest _ignore)
-  "Handles change signals from iwd, debouncing them and eventually calling `iwd--signal-handler-finish'."
+  "Handles change signals from iwd.
+
+Signals are debounced them and eventually calling
+`iwd--signal-handler-finish'."
   (unless iwd--state-change-debounce-timeout
-    (setq iwd--state-change-debounce-timeout (+ (float-time) 1.0))
+    (setq iwd--state-change-debounce-timeout
+          (+ (float-time) iwd--state-change-debounce-max))
   (when (and iwd--state-change-debounce-timer
              (< (float-time) iwd--state-change-debounce-timeout))
     (cancel-timer iwd--state-change-debounce-timer)
     (setq iwd--state-change-debounce-timer nil))
   (unless iwd--state-change-debounce-timer
     (setq iwd--state-change-debounce-timer
-          (run-with-timer 0.1 nil #'iwd--signal-handler-finish)))))
+          (run-with-timer iwd--state-change-debounce-min
+                          nil #'iwd--signal-handler-finish)))))
 
 (defun iwd--register-signal-handler ()
+  "Registers a D-Bus signal handler for iwd state-change events."
   (unless iwd--state-change-dbus-signals
     (dolist (m '("InterfacesAdded" "InterfacesRemoved"))
       (push
@@ -306,12 +369,12 @@
        iwd--state-change-dbus-signals))))
 
 (defun iwd--unregister-signal-handler ()
+  "Unregisteres D-Bus signal handlers for iwd state-change events."
   (dolist (obj iwd--state-change-dbus-signals)
     (dbus-unregister-object obj))
   (setq iwd--state-change-dbus-signals nil))
 
-(define-derived-mode iwd-mode tabulated-list-mode
-  iwd--mode-name
+(define-derived-mode iwd-mode tabulated-list-mode iwd--mode-name
   "Major mode for interfacing with iwd."
   (setq tabulated-list-format iwd--list-format
 	tabulated-list-entries #'iwd--list-entries
@@ -376,7 +439,7 @@ Part of the `net.connman.iwd.Agent' interface."
   "Registered method objects for the IWD agent.")
 
 (defun iwd--ensure-agent ()
-  "Create an IWD agent if it doesn't already exist."
+  "Create the IWD agent if it doesn't already exist."
   (unless iwd--agent-method-objects
     (setq iwd--agent-method-objects
           (mapcar (pcase-lambda (`(,method . ,handler))
@@ -385,7 +448,7 @@ Part of the `net.connman.iwd.Agent' interface."
                   iwd--agent-methods))))
 
 (defun iwd--destroy-agent ()
-  "Create an IWD agent."
+  "Destroy the IWD agent, if it exists."
   (when iwd--agent-method-objects
     (iwd--unregister-agent)
     (dolist (obj iwd--agent-method-objects)
@@ -431,3 +494,4 @@ iwd."
       (iwd-mode))))
 
 (provide 'iwd)
+;;; iwd.el ends here
