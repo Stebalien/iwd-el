@@ -323,12 +323,12 @@ Part of the `net.connman.iwd.Agent' interface."
 (defun iwd--destroy-agent ()
   "Create an IWD agent."
   (when iwd--agent-method-objects
-    (iwd-unregister-agent)
+    (iwd--unregister-agent)
     (dolist (obj iwd--agent-method-objects)
       (dbus-unregister-object obj))
     (setq iwd--agent-method-objects nil)))
 
-(defun iwd-register-agent ()
+(defun iwd--register-agent ()
   "Register the IWD agent."
   (unless iwd--agent-registered
     (iwd--ensure-agent)
@@ -337,7 +337,7 @@ Part of the `net.connman.iwd.Agent' interface."
       :object-path iwd--agent-path)
     (setq iwd--agent-registered t)))
 
-(defun iwd-unregister-agent ()
+(defun iwd--unregister-agent ()
   "Unregister the IWD agent."
   (when iwd--agent-registered
     (dbus-call-method :system iwd--dbus-service
