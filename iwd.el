@@ -41,15 +41,21 @@
     iwd--dbus-path))
 
 (defun iwd--get-devices (obj-alist)
-  "Extract devices from the object alist."
+  "Extract powered devices from the object alist."
   (let ((filter (lambda (obj) (assoc "net.connman.iwd.Device" obj)))
-	(format (lambda (obj) (append (list (car obj)
-					    (assoc "Name" (assoc "net.connman.iwd.Device" obj))
-					    (assoc "Address" (assoc "net.connman.iwd.Device" obj)))
-				      (dbus-call-method :system iwd--dbus-service
-							(car obj)
-							"net.connman.iwd.Station"
-							"GetOrderedNetworks")))))
+	(format (lambda (obj) (let ((dev (assoc "net.connman.iwd.Device" obj)))
+                           (append (list (car obj)
+                                         (assoc "Name" dev)
+                                         (assoc "Address" dev)
+                                         (assoc "Powered" dev))
+                                   ;; The device may not be powered. We could check, but that check
+                                   ;; would be racy so we might as well call first and ignore errors
+                                   ;; later.
+                                   (ignore-errors
+                                     (dbus-call-method :system iwd--dbus-service
+                                       (car obj)
+                                       "net.connman.iwd.Station"
+                                       "GetOrderedNetworks")))))))
     (mapcar format (seq-filter filter obj-alist))))
 
 (defun iwd--signal-strength-to-string (s)
@@ -226,8 +232,11 @@
   "Scan for available networks."
   (interactive)
   (dolist (device (iwd--get-devices (iwd--get-obj-alist)))
-    (dbus-call-method-asynchronously :system iwd--dbus-service
-      (car device) "net.connman.iwd.Station" "Scan" nil)))
+    ;; Ignore errors because the device may not be powered, or we may already be scanning.
+    ;; We call async because there's no need to block, we don't really care about the outcome.
+    (ignore-errors
+      (dbus-call-method-asynchronously :system iwd--dbus-service
+        (car device) "net.connman.iwd.Station" "Scan" nil))))
 
 (defun iwd-disconnect ()
   "Disconnect the selected network, or all networks if not in an `iwd' buffer."
