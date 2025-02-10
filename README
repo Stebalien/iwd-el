@@ -1,3 +1,6 @@
+Fork of https://git.sr.ht/~leon_plickat/iwd-el with some additional
+patches.
+
 Emacs major mode to interface with iwd, allowing you to manage
 wireless connections.
 
