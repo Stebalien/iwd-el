@@ -6,7 +6,7 @@
 ;; Author: Leon Henrik Plickat <leonhenrik.plickat@stud.uni-goettingen.de>
 ;; URL: https://git.sr.ht/~leon_plickat/iwd-el
 ;; Version: 0.0.1
-;; Package-Requires: ((emacs "29.1"))
+;; Package-Requires: ((emacs "30.1"))
 ;; Keywords: unix, network
 
 ;; This file is not part of GNU Emacs.
@@ -33,6 +33,7 @@
 ;;; Code:
 
 (require 'dbus)
+(require 'hex-util)
 
 ;; TODO: DBus methods that may be useful
 ;; -> use (y-or-no-p "Forget network XXX?") for deleting known networks
@@ -313,6 +314,7 @@ devices."
 (defvar-keymap iwd-mode-map
   :doc "`iwd-mode' keymap."
   :parent tabulated-list-mode-map
+  (kbd "p") #'iwd-get-passphrase
   (kbd "c") #'iwd-connect
   (kbd "s") #'iwd-scan)
 
@@ -390,6 +392,53 @@ Signals are debounced them and eventually calling
   "Get the network name of PATH."
   (dbus-get-property :system iwd--dbus-service
     path "net.connman.iwd.Network" "Name"))
+
+(defconst iwd--state-directory "/var/lib/iwd/")
+
+(autoload 'tramp-file-name-with-sudo "tramp-cmds")
+
+(defun iwd-get-passphrase (network)
+  "Read and display a NETWORK's passphrase."
+  (interactive
+   (list
+    (if (eq major-mode 'iwd-mode)
+        (elt (tabulated-list-get-entry) 1)
+      (let* ((psk-files (directory-files
+                         (tramp-file-name-with-sudo iwd--state-directory)
+                         nil "\\.psk$"))
+             (networks (mapcar (lambda (file)
+                                 (if (string-prefix-p "=" file)
+                                     (decode-hex-string (substring file 1 -4))
+                                   (substring file 0 -4)))
+                               psk-files)))
+        (completing-read "Network: " networks nil t)))))
+  (setq network (substring-no-properties network))
+  (let* ((fname (if (string-match-p
+                     (rx bos (* (or alnum (any "-_ "))) eos)
+                     network)
+                    network
+                  (concat "=" (encode-hex-string network))))
+         (psk (with-temp-buffer
+                (condition-case err
+                    (insert-file-contents
+                     (tramp-file-name-with-sudo
+                      (concat iwd--state-directory fname ".psk")))
+                  (file-missing
+                   (error "No known passphrase for network" network)))
+                (goto-char (point-min))
+                (when-let* ((section-start
+                             (re-search-forward (rx bol "[Security]" eol) nil t))
+                            (section-end
+                             (or (re-search-forward (rx bol "[") nil t)
+                                 (point-max))))
+                  (goto-char section-start)
+                  (when (re-search-forward
+                         (rx bol "Passphrase=" (group-n 1 (* any)) eol)
+                         section-end t)
+                    (match-string 1))))))
+    (if (called-interactively-p)
+        (let (message-log-max) (message "The password for %S is %S" network psk))
+      psk)))
 
 (defvar iwd--agent-registered nil
   "Non-nil when the IWD agent has been registered.")
