@@ -75,11 +75,43 @@
 (defconst iwd--dbus-service "net.connman.iwd")
 (defconst iwd--dbus-path "/net/connman/iwd")
 
-(defun iwd--get-obj-alist ()
+(defvar iwd--state-cache nil
+  "IWD state cache.")
+
+(defvar iwd--update-status nil
+  "Status of an ongoing update.")
+
+(defun iwd--update-tabulated-list ()
+  "Update the IWD buffer."
+  (when-let* ((buf (get-buffer iwd--buffer-name)))
+    (with-current-buffer buf
+      (tabulated-list-revert))))
+
+(defvar iwd-updated-hook '(iwd--update-tabulated-list)
+  "Hook run when the IWD object list is refreshed.")
+
+(defun iwd--update-state-cache-sync ()
+  "Repeatedly update the IWD object cache until updates are no longer requested."
+  (unwind-protect
+      (while (eq iwd--update-status 'requested)
+        (setq iwd--update-status 'running)
+        (let ((objects (dbus-get-all-managed-objects :system
+                         iwd--dbus-service
+                         iwd--dbus-path)))
+          (setq iwd--state-cache (cons objects (iwd--get-devices objects)))))
+    (setq iwd--update-status nil))
+  ;; Schedule the hooks on the main thread.
+  (run-with-timer 0 nil 'run-hooks 'iwd-updated-hook))
+
+(defun iwd--update-state-cache ()
   "Get all toplevel DBus objects related to iwd."
-  (dbus-get-all-managed-objects :system
-    iwd--dbus-service
-    iwd--dbus-path))
+  (let ((running iwd--update-status))
+    (setq iwd--update-status 'requested)
+    (unless running (make-thread 'iwd--update-state-cache-sync "IWD Update"))))
+
+(defun iwd--get-state ()
+  "Get all toplevel DBus objects related to iwd."
+  iwd--state-cache)
 
 (defun iwd--get-devices (obj-alist)
   "Extract powered devices from the OBJ-ALIST."
@@ -101,76 +133,79 @@
 
 (defun iwd--signal-strength-to-string (s)
   "Turn signal strength S as returned by iwd to string displayed in `iwd-mode'."
-  (let ((dbm (/ s 100)))
-    (if iwd-signal-show-dbm
-	(concat (int-to-string dbm) " dBm")
-      (propertize (cond ((>= dbm -30) "*****")
-			((>= dbm -67) "****")
-			((>= dbm -80) "***")
-			((>= dbm -90) "**")
-			(t "*"))
-		  'face 'bold))))
+  (if s (let ((dbm (/ s 100)))
+          (if iwd-signal-show-dbm
+              (concat (int-to-string dbm) " dBm")
+            (propertize (cond ((>= dbm -30) "*****")
+                              ((>= dbm -67) "****")
+                              ((>= dbm -80) "***")
+                              ((>= dbm -90) "**")
+                              (t "*"))
+                        'face 'bold)))
+    "?"))
 
-(defun iwd--get-connectable-networks (obj-alist devices)
-  "Return a list all networks we can connect to from the given OBJ-ALIST.
-
-Device name is added to SSID if multiple devices are available and DEVICES is
-non-nil."
-  (let ((filter (lambda (obj) (let* ((network (assoc "net.connman.iwd.Network" obj))
-				     (connected (assoc "Connected" network)))
-				(and network (not (cdr connected))))))
-	(format (lambda (obj) (let* ((id (intern (car obj)))
-				     (network (assoc "net.connman.iwd.Network" obj))
-				     (ssid (cdr (assoc "Name" network)))
-				     (name (if (> (length devices) 1)
-					       (let* ((device-obj (assoc (cdr (assoc "Device" network)) devices))
-						      (device-name (cdr (assoc "Name" device-obj))))
-						 (concat ssid " (" device-name ")"))
-					     ssid)))
-				(list name id)))))
+(defun iwd--get-connectable-networks (state)
+  "Return a list all networks we can connect to from the given STATE."
+  (let* ((obj-alist (car state))
+         (devices (cdr state))
+         (filter (lambda (obj) (let* ((network (assoc "net.connman.iwd.Network" obj))
+                                 (connected (assoc "Connected" network)))
+                            (and network (not (cdr connected))))))
+         (format (lambda (obj) (let* ((id (intern (car obj)))
+                                 (network (assoc "net.connman.iwd.Network" obj))
+                                 (ssid (cdr (assoc "Name" network)))
+                                 (name (if (> (length devices) 1)
+                                           (let* ((device-obj (assoc (cdr (assoc "Device" network)) devices))
+                                                  (device-name (cdr (assoc "Name" device-obj))))
+                                             (concat ssid " (" device-name ")"))
+                                         ssid)))
+                            (list name id)))))
     (mapcar format (seq-filter filter obj-alist))))
 
-(defun iwd--get-known-networks (obj-alist)
-  "Return a list of all known networks from the given OBJ-ALIST."
+(defun iwd--get-known-networks (state)
+  "Return a list of all known networks from the given STATE."
   (let ((filter (lambda (obj) (assoc "net.connman.iwd.KnownNetwork" obj)))
 	(format (lambda (obj) (let* ((id (intern (car obj)))
 				(network (assoc "net.connman.iwd.KnownNetwork" obj))
 				(name (cdr (assoc "Name" network))))
 			   (list name id)))))
-    (mapcar format (seq-filter filter obj-alist))))
+    (mapcar format (seq-filter filter (car state)))))
 
-(defun iwd--get-visible-networks-row (obj-alist devices)
-  "Return a list of all visible networks from the given OBJ-ALIST and DEVICES.
+(defun iwd--get-visible-networks-row (state)
+  "Return a list of all visible networks from the given STATE.
 
 The returned list is formatted for use in `tabulated-list-mode'."
-  (let ((filter (lambda (obj) (assoc "net.connman.iwd.Network" obj)))
-	(format (lambda (obj) (let* ((id (intern (car obj)))
-				     (network (assoc "net.connman.iwd.Network" obj))
-				     (ssid (cdr (assoc "Name" network)))
-				     (device-obj (assoc (cdr (assoc "Device" network)) devices))
-				     (device-name (cdr (assoc "Name" device-obj)))
-				     (security (cdr (assoc "Type" network)))
-				     (connected (cond
-						 ((cdr (assoc "Connected" network)) iwd-connected-symbol)
-						 ((cdr (assoc "KnownNetwork" network)) iwd-known-symbol)
-						 (t "")))
-				     (address (if (cdr (assoc "Connected" network))
-						  (cdr (assoc "Address" device-obj))
-						""))
-				     (sigqual (iwd--signal-strength-to-string (cadr (assoc (car obj) device-obj)))))
-				(list id (vector connected (propertize
-                                                            ssid
-                                                            'face
-                                                            (if (equal connected iwd-connected-symbol) 'iwd-connected-network 'iwd-available-network))
-                                                 device-name sigqual security address))))))
+  (let* ((obj-alist (car state))
+         (devices (cdr state))
+         (filter (lambda (obj) (assoc "net.connman.iwd.Network" obj)))
+         (format (lambda (obj) (let* ((id (intern (car obj)))
+                                 (network (assoc "net.connman.iwd.Network" obj))
+                                 (ssid (cdr (assoc "Name" network)))
+                                 (device-obj (assoc (cdr (assoc "Device" network)) devices))
+                                 (device-name (cdr (assoc "Name" device-obj)))
+                                 (security (cdr (assoc "Type" network)))
+                                 (connected (cond
+                                             ((cdr (assoc "Connected" network)) iwd-connected-symbol)
+                                             ((cdr (assoc "KnownNetwork" network)) iwd-known-symbol)
+                                             (t "")))
+                                 (address (if (cdr (assoc "Connected" network))
+                                              (cdr (assoc "Address" device-obj))
+                                            ""))
+                                 (sigqual (iwd--signal-strength-to-string (cadr (assoc (car obj) device-obj)))))
+                            (list id (vector connected (propertize
+                                                        ssid
+                                                        'face
+                                                        (if (equal connected iwd-connected-symbol) 'iwd-connected-network 'iwd-available-network))
+                                             device-name sigqual security address))))))
     (mapcar format (seq-filter filter obj-alist))))
 
-(defun iwd--get-known-networks-row (obj-alist visible-networks)
+(defun iwd--get-known-networks-row (state visible-networks)
   "Return a list of all known networks from the given OBJ-ALIST.
 
 The returned list is formatted for use in `tabulated-list-mode'. If specified,
 networks in VISIBLE-NETWORKS are excluded."
-  (let* ((extract-name (lambda (id) (last (delete "" (split-string id "/")))))
+  (let* ((obj-alist (car state))
+         (extract-name (lambda (id) (last (delete "" (split-string id "/")))))
 	 (visible-network-names (mapcar (lambda (obj) (funcall extract-name (symbol-name (car obj)))) visible-networks))
 	 (filter (lambda (obj) (and (assoc "net.connman.iwd.KnownNetwork" obj)
 				    (not (member (funcall extract-name (car obj))
@@ -184,10 +219,9 @@ networks in VISIBLE-NETWORKS are excluded."
 
 (defun iwd--list-entries ()
   "Generate the `iwd-mode' table entries."
-  (let* ((obj-alist (iwd--get-obj-alist))
-	 (devices (iwd--get-devices obj-alist))
-	 (visible-networks (iwd--get-visible-networks-row obj-alist devices))
-	 (known-networks (iwd--get-known-networks-row obj-alist visible-networks)))
+  (let* ((state (iwd--get-state))
+	 (visible-networks (iwd--get-visible-networks-row state))
+	 (known-networks (iwd--get-known-networks-row state visible-networks)))
     (append visible-networks known-networks)))
 
 (defconst iwd--list-format
@@ -218,9 +252,7 @@ networks in VISIBLE-NETWORKS are excluded."
 		     ;; Get list of connectable networks, then querry
 		     ;; user for SSID. Raises error if no unconnected
 		     ;; networks are available.
-		     (let* ((obj-alist (iwd--get-obj-alist))
-			    (devices (iwd--get-devices obj-alist))
-			    (networks (iwd--get-connectable-networks obj-alist devices))
+		     (let* ((networks (iwd--get-connectable-networks (iwd--get-state)))
 			    (ssids (mapcar (lambda (x) (car x)) networks))
                             (selected-ssid
                              (if (> (length ssids) 0)
@@ -248,8 +280,8 @@ SSID."
           "net.connman.iwd.Network" "KnownNetwork"))
     ;; Get list of known networks, then query user for SSID. Raises error if known
     ;; networks are available.
-    (let* ((obj-alist (iwd--get-obj-alist))
-           (networks (iwd--get-known-networks obj-alist))
+    (let* ((state (iwd--get-state))
+           (networks (iwd--get-known-networks state))
            (ssids (mapcar (lambda (x) (car x)) networks))
            (selected-ssid (if (> (length ssids) 0)
                               (completing-read "Forget network: " ssids
@@ -276,7 +308,7 @@ devices."
           (user-error "Not connected to `%s' (%s)" name dev))
         (list (dbus-get-property :system iwd--dbus-service
                 (symbol-name id) "net.connman.iwd.Network" "Device")))
-    (mapcar 'car (iwd--get-devices (iwd--get-obj-alist)))))
+    (mapcar 'car (cdr (iwd--get-state)))))
 
 ;;;###autoload
 (defun iwd-connect (path)
@@ -296,7 +328,7 @@ devices."
 (defun iwd-scan ()
   "Scan for available networks."
   (interactive)
-  (dolist (device (iwd--get-devices (iwd--get-obj-alist)))
+  (dolist (device (cdr (iwd--get-state)))
     ;; Ignore errors because the device may not be powered, or we may already be scanning.
     ;; We call async because there's no need to block, we don't really care about the outcome.
     (ignore-errors
@@ -337,9 +369,8 @@ devices."
   "Handles change signals from iwd and updates the iwd buffer accordingly."
   (setq iwd--state-change-debounce-timer nil
         iwd--state-change-debounce-timeout nil)
-  (if-let* ((buf (get-buffer iwd--buffer-name)))
-      (with-current-buffer buf
-        (tabulated-list-revert))
+  (if (get-buffer iwd--buffer-name)
+      (iwd--update-state-cache)
     (iwd--unregister-signal-handler)))
 
 (defun iwd--signal-handler (&rest _ignore)
@@ -362,11 +393,18 @@ Signals are debounced them and eventually calling
 (defun iwd--register-signal-handler ()
   "Registers a D-Bus signal handler for iwd state-change events."
   (unless iwd--state-change-dbus-signals
+    (push
+     (dbus-register-signal
+      :system iwd--dbus-service
+      nil dbus-interface-properties
+      "PropertiesChanged"
+      #'iwd--signal-handler)
+     iwd--state-change-dbus-signals)
     (dolist (m '("InterfacesAdded" "InterfacesRemoved"))
       (push
        (dbus-register-signal
         :system iwd--dbus-service
-        "/" dbus-interface-objectmanager m
+        nil dbus-interface-objectmanager m
         #'iwd--signal-handler)
        iwd--state-change-dbus-signals))))
 
@@ -424,7 +462,7 @@ Signals are debounced them and eventually calling
                      (tramp-file-name-with-sudo
                       (concat iwd--state-directory fname ".psk")))
                   (file-missing
-                   (error "No known passphrase for network" network)))
+                   (error "No known passphrase for network %s: %s" network err)))
                 (goto-char (point-min))
                 (when-let* ((section-start
                              (re-search-forward (rx bol "[Security]" eol) nil t))
@@ -436,7 +474,7 @@ Signals are debounced them and eventually calling
                          (rx bol "Passphrase=" (group-n 1 (* any)) eol)
                          section-end t)
                     (match-string 1))))))
-    (if (called-interactively-p)
+    (if (called-interactively-p 'interactive)
         (let (message-log-max) (message "The password for %S is %S" network psk))
       psk)))
 
@@ -537,6 +575,7 @@ iwd."
   "Control iwd WLAN connections."
   (interactive)
   (with-current-buffer (switch-to-buffer iwd--buffer-name)
+    (iwd--update-state-cache)
     (iwd--register-signal-handler)
     (unless (derived-mode-p 'iwd-mode)
       (erase-buffer)
